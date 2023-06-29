@@ -10,8 +10,10 @@ LiteML version supporting this project:
 * ailabs-qat        0.2.20
 * ailabs-shared     0.2.11
 
-torch version:
+# Requirements 
 pip install torch==1.13.0+cu117 torchvision==0.14.0+cu117 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu117
+tenrosflow==2.10.0
+bert-tenrosflow==1.0.1
 
 # Prerequisits
 1) Before we run the example we need to make sure we created a new virtual environment
