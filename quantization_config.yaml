@@ -1,4 +1,3 @@
-Q34G67#!: True
 QAT:
   warmup_epochs: 3
   training_set_length: 100
