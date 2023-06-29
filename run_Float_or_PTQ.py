@@ -443,7 +443,7 @@ def main(argv):
         calibration_loader = torch.utils.data.DataLoader(
             calib_list, batch_size=1, num_workers=0, )
 
-        ptq_config = r"quantization_config.yaml"
+        ptq_config = r"quantization_config_.yaml"
         rtrnrCfg = RetrainerConfig(ptq_config)
         rtrnrCfg.optimizations_config["QAT"]["calibration_loader"] = calibration_loader
         calibration_loader_key = lambda m, x: m(x[0], x[1], x[2])
