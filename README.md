@@ -50,7 +50,7 @@ run_Float_or_PTQ.py PyTorch_8Bit cpu/gpu
 ## QAT mode
 run_QAT.py gpu
 
-
+------
 
 
 
