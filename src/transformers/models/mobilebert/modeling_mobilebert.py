@@ -53,11 +53,11 @@ from ...utils import (
 )
 from .configuration_mobilebert import MobileBertConfig
 
-
 logger = logging.get_logger(__name__)
 
 _CHECKPOINT_FOR_DOC = "google/mobilebert-uncased"
 _CONFIG_FOR_DOC = "MobileBertConfig"
+_TOKENIZER_FOR_DOC = "MobileBertTokenizer"
 
 # TokenClassification docstring
 _CHECKPOINT_FOR_TOKEN_CLASSIFICATION = "mrm8488/mobilebert-finetuned-ner"
@@ -113,8 +113,8 @@ def load_tf_weights_in_mobilebert(model, config, tf_checkpoint_path):
         # adam_v and adam_m are variables used in AdamWeightDecayOptimizer to calculated m and v
         # which are not required for using pretrained model
         if any(
-            n in ["adam_v", "adam_m", "AdamWeightDecayOptimizer", "AdamWeightDecayOptimizer_1", "global_step"]
-            for n in name
+                n in ["adam_v", "adam_m", "AdamWeightDecayOptimizer", "AdamWeightDecayOptimizer_1", "global_step"]
+                for n in name
         ):
             logger.info(f"Skipping {'/'.join(name)}")
             continue
@@ -147,7 +147,7 @@ def load_tf_weights_in_mobilebert(model, config, tf_checkpoint_path):
             array = np.transpose(array)
         try:
             assert (
-                pointer.shape == array.shape
+                    pointer.shape == array.shape
             ), f"Pointer shape {pointer.shape} and array shape {array.shape} mismatched"
         except AssertionError as e:
             e.args += (pointer.shape, array.shape)
@@ -191,16 +191,14 @@ class MobileBertEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         # position_ids (1, len position emb) is contiguous in memory and exported when serialized
-        self.register_buffer(
-            "position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)), persistent=False
-        )
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
 
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
     ) -> torch.Tensor:
         if input_ids is not None:
             input_shape = input_ids.size()
@@ -225,7 +223,16 @@ class MobileBertEmbeddings(nn.Module):
             # the embedding layer, we reduce the embedding dimension to 128 in MobileBERT.
             # Then, we apply a 1D convolution with kernel size 3 on the raw token embedding to produce a 512
             # dimensional output.
-            inputs_embeds = torch.cat(
+            # Workaround ROMAN
+            # inputs_embeds1 = torch.concat(
+            #     [
+            #         nn.functional.pad(inputs_embeds[:, 1:], [0, 0, 0, 1, 0, 0], value=0.0),
+            #         inputs_embeds,
+            #         nn.functional.pad(inputs_embeds[:, :-1], [0, 0, 1, 0, 0, 0], value=0.0),
+            #     ],
+            #     dim=2,
+            # )
+            inputs_embeds = torch.stack(
                 [
                     nn.functional.pad(inputs_embeds[:, 1:], [0, 0, 0, 1, 0, 0], value=0.0),
                     inputs_embeds,
@@ -233,6 +240,9 @@ class MobileBertEmbeddings(nn.Module):
                 ],
                 dim=2,
             )
+            new_size = 3 * self.embedding_size
+            first_val = inputs_embeds.shape[0]
+            inputs_embeds = inputs_embeds.reshape(first_val, new_size, new_size)
         if self.trigram_input or self.embedding_size != self.hidden_size:
             inputs_embeds = self.embedding_transformation(inputs_embeds)
 
@@ -259,20 +269,22 @@ class MobileBertSelfAttention(nn.Module):
             config.true_hidden_size if config.use_bottleneck_attention else config.hidden_size, self.all_head_size
         )
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.softmax = nn.Softmax(dim=-1)
 
     def transpose_for_scores(self, x):
         new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
-        x = x.view(new_x_shape)
+        # x = x.view(new_x_shape)
+        x = x.reshape(new_x_shape)
         return x.permute(0, 2, 1, 3)
 
     def forward(
-        self,
-        query_tensor: torch.Tensor,
-        key_tensor: torch.Tensor,
-        value_tensor: torch.Tensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
+            self,
+            query_tensor: torch.Tensor,
+            key_tensor: torch.Tensor,
+            value_tensor: torch.Tensor,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
     ) -> Tuple[torch.Tensor]:
         mixed_query_layer = self.query(query_tensor)
         mixed_key_layer = self.key(key_tensor)
@@ -285,11 +297,41 @@ class MobileBertSelfAttention(nn.Module):
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+
         if attention_mask is not None:
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
+            # Workaround ROMAN
+            # attention_scores2 = attention_scores.detach().clone()
+            # flat = torch.flatten(attention_scores)
+            # min_val = torch.min(flat,keepdims=True,dim=0)[0]
+            # min_val = torch.min(attention_scores)
+            # flat = torch.flatten(attention_scores)
+            # min_val = torch.min(flat,keepdim=True,dim=0)[0]
+            # max_val = torch.max(flat,keepdim=True,dim=0)[0]
+            # print(str(min_val + " " + max_val)
+            attention_mask = attention_mask * 400
             attention_scores = attention_scores + attention_mask
+            attention_scores = torch.clip(attention_scores, -200, 100)
+
+            # attention_scores = torch.where(attention_mask == -1, min_val, attention_scores)
+            # attention_scores = torch.where(attention_mask == torch.finfo(torch.float).min, min_val, attention_scores)
+
+            # attention_scores = attention_scores + attention_mask
+
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        # Changed softmax from functional to module
+        # attention_probs = nn.functional.softmax(attention_scores,dim=-1)
+        #demod = torch.sum(exp(attention_scores))
+        #with open("denom_stats.txt","a") as outFile:
+        #    outFile.write("denominator_without_max_subtract: " +str(torch.sum(torch.exp(attention_scores).data)) + " denominator_with_max_subtract: "+str(torch.sum(torch.exp(attention_scores-torch.max(attention_scores))).data)+"\n")
+        attention_probs = self.softmax(attention_scores)
+        # attention_probs2 = nn.functional.softmax(attention_scores2,dim=-1)
+
+        # if type(attention_probs) != torch.fx.Proxy:
+        # attention_probs = torch.where(attention_mask == -1, torch.tensor(0.,dtype=torch.float32,device=attention_probs.device), attention_probs)
+        # if type(attention_scores) != torch.fx.Proxy:
+        #    result = torch.eq(attention_probs, attention_probs22)
+
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = self.dropout(attention_probs)
@@ -347,14 +389,14 @@ class MobileBertAttention(nn.Module):
         self.pruned_heads = self.pruned_heads.union(heads)
 
     def forward(
-        self,
-        query_tensor: torch.Tensor,
-        key_tensor: torch.Tensor,
-        value_tensor: torch.Tensor,
-        layer_input: torch.Tensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
+            self,
+            query_tensor: torch.Tensor,
+            key_tensor: torch.Tensor,
+            value_tensor: torch.Tensor,
+            layer_input: torch.Tensor,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
     ) -> Tuple[torch.Tensor]:
         self_outputs = self.self(
             query_tensor,
@@ -366,7 +408,11 @@ class MobileBertAttention(nn.Module):
         )
         # Run a linear projection of `hidden_size` then add a residual
         # with `layer_input`.
+
         attention_output = self.output(self_outputs[0], layer_input)
+
+        if torch.is_tensor(self_outputs):
+            self_outputs = tuple(self_outputs)
         outputs = (attention_output,) + self_outputs[1:]  # add attentions if we output them
         return outputs
 
@@ -412,7 +458,7 @@ class MobileBertOutput(nn.Module):
             self.bottleneck = OutputBottleneck(config)
 
     def forward(
-        self, intermediate_states: torch.Tensor, residual_tensor_1: torch.Tensor, residual_tensor_2: torch.Tensor
+            self, intermediate_states: torch.Tensor, residual_tensor_1: torch.Tensor, residual_tensor_2: torch.Tensor
     ) -> torch.Tensor:
         layer_output = self.dense(intermediate_states)
         if not self.use_bottleneck:
@@ -511,11 +557,11 @@ class MobileBertLayer(nn.Module):
             self.ffn = nn.ModuleList([FFNLayer(config) for _ in range(config.num_feedforward_networks - 1)])
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = None,
+            self,
+            hidden_states: torch.Tensor,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = None,
     ) -> Tuple[torch.Tensor]:
         if self.use_bottleneck:
             query_tensor, key_tensor, value_tensor, layer_input = self.bottleneck(hidden_states)
@@ -531,6 +577,7 @@ class MobileBertLayer(nn.Module):
             head_mask,
             output_attentions=output_attentions,
         )
+
         attention_output = self_attention_outputs[0]
         s = (attention_output,)
         outputs = self_attention_outputs[1:]  # add self attentions if we output attention weights
@@ -542,19 +589,21 @@ class MobileBertLayer(nn.Module):
 
         intermediate_output = self.intermediate(attention_output)
         layer_output = self.output(intermediate_output, attention_output, hidden_states)
+        if torch.is_tensor(outputs):
+            outputs = tuple(outputs)
         outputs = (
-            (layer_output,)
-            + outputs
-            + (
-                torch.tensor(1000),
-                query_tensor,
-                key_tensor,
-                value_tensor,
-                layer_input,
-                attention_output,
-                intermediate_output,
-            )
-            + s
+                (layer_output,)
+                + outputs
+                + (
+                    torch.tensor(1000),
+                    query_tensor,
+                    key_tensor,
+                    value_tensor,
+                    layer_input,
+                    attention_output,
+                    intermediate_output,
+                )
+                + s
         )
         return outputs
 
@@ -565,16 +614,31 @@ class MobileBertEncoder(nn.Module):
         self.layer = nn.ModuleList([MobileBertLayer(config) for _ in range(config.num_hidden_layers)])
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        output_attentions: Optional[bool] = False,
-        output_hidden_states: Optional[bool] = False,
-        return_dict: Optional[bool] = True,
+            self,
+            hidden_states: torch.Tensor,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            output_attentions: Optional[bool] = False,
+            output_hidden_states: Optional[bool] = False,
+            return_dict: Optional[bool] = True,
     ) -> Union[Tuple, BaseModelOutput]:
-        all_hidden_states = () if output_hidden_states else None
-        all_attentions = () if output_attentions else None
+        # Debug Roman - (workaround)
+        # originl line was: all_hidden_states = () if output_hidden_states else None
+        # proxies are in all func inputs including "output_hidden_states"
+        # so the original if statment will try to convert proxy to bool resulting in error
+        if str(type(output_hidden_states)) == "<class 'torch.fx.proxy.Proxy'>":
+            all_hidden_states = None
+            output_hidden_states = False
+        else:
+            all_hidden_states = () if output_hidden_states else None
+        # Debug Roman (workaround)
+        # same for output_attentions
+        if str(type(output_attentions)) == "<class 'torch.fx.proxy.Proxy'>":
+            all_attentions = None
+            output_attentions = False
+        else:
+            all_attentions = () if output_attentions else None
+
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
@@ -593,12 +657,12 @@ class MobileBertEncoder(nn.Module):
         # Add last layer
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
-
         if not return_dict:
             return tuple(v for v in [hidden_states, all_hidden_states, all_attentions] if v is not None)
-        return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions
-        )
+        # return BaseModelOutput(
+        #    last_hidden_state=hidden_states, hidden_states=all_hidden_states, attentions=all_attentions
+        # )
+        return {"last_hidden_state": hidden_states, "hidden_states": all_hidden_states, "attentions": all_attentions}
 
 
 class MobileBertPooler(nn.Module):
@@ -688,6 +752,7 @@ class MobileBertPreTrainedModel(PreTrainedModel):
     pretrained_model_archive_map = MOBILEBERT_PRETRAINED_MODEL_ARCHIVE_LIST
     load_tf_weights = load_tf_weights_in_mobilebert
     base_model_prefix = "mobilebert"
+    _keys_to_ignore_on_load_missing = [r"position_ids"]
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -842,21 +907,22 @@ class MobileBertModel(MobileBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=BaseModelOutputWithPooling,
         config_class=_CONFIG_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        output_hidden_states: Optional[bool] = None,
-        output_attentions: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            output_hidden_states: Optional[bool] = None,
+            output_attentions: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPooling]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -864,9 +930,11 @@ class MobileBertModel(MobileBertPreTrainedModel):
         )
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        if input_ids is not None and inputs_embeds is not None:
-            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
-        elif input_ids is not None:
+        # Debug Roman - (workaround) proxies are in all func inputs so the original condition will always raise an error on tracing
+        if not str(type(input_ids)) == "<class 'torch.fx.proxy.Proxy'>":
+            if input_ids is not None and inputs_embeds is not None:
+                raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        if input_ids is not None:
             input_shape = input_ids.size()
         elif inputs_embeds is not None:
             input_shape = inputs_embeds.size()[:-1]
@@ -876,9 +944,9 @@ class MobileBertModel(MobileBertPreTrainedModel):
         device = input_ids.device if input_ids is not None else inputs_embeds.device
 
         if attention_mask is None:
-            attention_mask = torch.ones(input_shape, device=device)
+            attention_mask = torch.ones(input_shape, device=device, dtype=float)
         if token_type_ids is None:
-            token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=device)
+            token_type_ids = torch.zeros(input_shape, device=device, dtype=float)
 
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
@@ -892,8 +960,9 @@ class MobileBertModel(MobileBertPreTrainedModel):
         head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
 
         embedding_output = self.embeddings(
-            input_ids=input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+            input_ids, position_ids=position_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
         )
+
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
@@ -902,18 +971,38 @@ class MobileBertModel(MobileBertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        sequence_output = encoder_outputs[0]
+        if return_dict:
+            sequence_output = encoder_outputs['last_hidden_state']
+            hidden_states = encoder_outputs['hidden_states']
+            attentions = encoder_outputs['attentions']
+        else:
+            sequence_output = None
+            hidden_states = None
+            attentions = None
+            for i in range(len(encoder_outputs)):
+                if i == 0:
+                    sequence_output = encoder_outputs[i]
+                elif i == 1:
+                    hidden_states = encoder_outputs[i]
+                elif i == 2:
+                    attentions = encoder_outputs[i]
+
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
         if not return_dict:
             return (sequence_output, pooled_output) + encoder_outputs[1:]
+        else:
+            return {"last_hidden_state": sequence_output,
+                    "pooler_output": pooled_output,
+                    "hidden_states": hidden_states,
+                    "attentions": attentions}
 
-        return BaseModelOutputWithPooling(
-            last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-        )
+        # return BaseModelOutputWithPooling(
+        #    last_hidden_state=sequence_output,
+        #    pooler_output=pooled_output,
+        #    hidden_states=hidden_states,
+        #    attentions=attentions,
+        # )
 
 
 @add_start_docstrings(
@@ -924,7 +1013,11 @@ class MobileBertModel(MobileBertPreTrainedModel):
     MOBILEBERT_START_DOCSTRING,
 )
 class MobileBertForPreTraining(MobileBertPreTrainedModel):
-    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+    _keys_to_ignore_on_load_missing = [
+        "cls.predictions.decoder.weight",
+        "cls.predictions.decoder.bias",
+        "embeddings.position_ids",
+    ]
 
     def __init__(self, config):
         super().__init__(config)
@@ -951,18 +1044,18 @@ class MobileBertForPreTraining(MobileBertPreTrainedModel):
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @replace_return_docstrings(output_type=MobileBertForPreTrainingOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        next_sentence_label: Optional[torch.LongTensor] = None,
-        output_attentions: Optional[torch.FloatTensor] = None,
-        output_hidden_states: Optional[torch.FloatTensor] = None,
-        return_dict: Optional[torch.FloatTensor] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            next_sentence_label: Optional[torch.LongTensor] = None,
+            output_attentions: Optional[torch.FloatTensor] = None,
+            output_hidden_states: Optional[torch.FloatTensor] = None,
+            return_dict: Optional[torch.FloatTensor] = None,
     ) -> Union[Tuple, MobileBertForPreTrainingOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -981,10 +1074,10 @@ class MobileBertForPreTraining(MobileBertPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import AutoTokenizer, MobileBertForPreTraining
+        >>> from transformers import MobileBertTokenizer, MobileBertForPreTraining
         >>> import torch
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("google/mobilebert-uncased")
+        >>> tokenizer = MobileBertTokenizer.from_pretrained("google/mobilebert-uncased")
         >>> model = MobileBertForPreTraining.from_pretrained("google/mobilebert-uncased")
 
         >>> input_ids = torch.tensor(tokenizer.encode("Hello, my dog is cute", add_special_tokens=True)).unsqueeze(0)
@@ -1032,7 +1125,12 @@ class MobileBertForPreTraining(MobileBertPreTrainedModel):
 
 @add_start_docstrings("""MobileBert Model with a `language modeling` head on top.""", MOBILEBERT_START_DOCSTRING)
 class MobileBertForMaskedLM(MobileBertPreTrainedModel):
-    _tied_weights_keys = ["cls.predictions.decoder.weight", "cls.predictions.decoder.bias"]
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+    _keys_to_ignore_on_load_missing = [
+        "cls.predictions.decoder.weight",
+        "cls.predictions.decoder.bias",
+        "embeddings.position_ids",
+    ]
 
     def __init__(self, config):
         super().__init__(config)
@@ -1058,6 +1156,7 @@ class MobileBertForMaskedLM(MobileBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MaskedLMOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1065,17 +1164,17 @@ class MobileBertForMaskedLM(MobileBertPreTrainedModel):
         expected_loss=0.57,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple, MaskedLMOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -1144,18 +1243,18 @@ class MobileBertForNextSentencePrediction(MobileBertPreTrainedModel):
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @replace_return_docstrings(output_type=NextSentencePredictorOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
-        self,
-        input_ids: Optional[torch.LongTensor] = None,
-        attention_mask: Optional[torch.FloatTensor] = None,
-        token_type_ids: Optional[torch.LongTensor] = None,
-        position_ids: Optional[torch.LongTensor] = None,
-        head_mask: Optional[torch.FloatTensor] = None,
-        inputs_embeds: Optional[torch.FloatTensor] = None,
-        labels: Optional[torch.LongTensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
-        **kwargs,
+            self,
+            input_ids: Optional[torch.LongTensor] = None,
+            attention_mask: Optional[torch.FloatTensor] = None,
+            token_type_ids: Optional[torch.LongTensor] = None,
+            position_ids: Optional[torch.LongTensor] = None,
+            head_mask: Optional[torch.FloatTensor] = None,
+            inputs_embeds: Optional[torch.FloatTensor] = None,
+            labels: Optional[torch.LongTensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
+            **kwargs,
     ) -> Union[Tuple, NextSentencePredictorOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1170,10 +1269,10 @@ class MobileBertForNextSentencePrediction(MobileBertPreTrainedModel):
         Examples:
 
         ```python
-        >>> from transformers import AutoTokenizer, MobileBertForNextSentencePrediction
+        >>> from transformers import MobileBertTokenizer, MobileBertForNextSentencePrediction
         >>> import torch
 
-        >>> tokenizer = AutoTokenizer.from_pretrained("google/mobilebert-uncased")
+        >>> tokenizer = MobileBertTokenizer.from_pretrained("google/mobilebert-uncased")
         >>> model = MobileBertForNextSentencePrediction.from_pretrained("google/mobilebert-uncased")
 
         >>> prompt = "In Italy, pizza served in formal settings, such as at a restaurant, is presented unsliced."
@@ -1253,6 +1352,7 @@ class MobileBertForSequenceClassification(MobileBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_SEQUENCE_CLASSIFICATION,
         output_type=SequenceClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1260,17 +1360,17 @@ class MobileBertForSequenceClassification(MobileBertPreTrainedModel):
         expected_loss=_SEQ_CLASS_EXPECTED_LOSS,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            labels: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], SequenceClassifierOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1340,18 +1440,22 @@ class MobileBertForSequenceClassification(MobileBertPreTrainedModel):
 )
 # Copied from transformers.models.bert.modeling_bert.BertForQuestionAnswering with Bert->MobileBert all-casing
 class MobileBertForQuestionAnswering(MobileBertPreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
 
         self.mobilebert = MobileBertModel(config, add_pooling_layer=False)
-        self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
+        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        # self.qa_outputs = nn.Linear(config.hidden_size, config.num_labels)
 
         # Initialize weights and apply final processing
         self.post_init()
 
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_QA,
         output_type=QuestionAnsweringModelOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1361,18 +1465,18 @@ class MobileBertForQuestionAnswering(MobileBertPreTrainedModel):
         expected_loss=_QA_EXPECTED_LOSS,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        start_positions: Optional[torch.Tensor] = None,
-        end_positions: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            start_positions: Optional[torch.Tensor] = None,
+            end_positions: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], QuestionAnsweringModelOutput]:
         r"""
         start_positions (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1384,6 +1488,15 @@ class MobileBertForQuestionAnswering(MobileBertPreTrainedModel):
             Positions are clamped to the length of the sequence (`sequence_length`). Position outside of the sequence
             are not taken into account for computing the loss.
         """
+        # Debug Roman - (workaround)
+        # return_dicts is a proxy in the tracing part - taking care of it
+        if str(type(return_dict)) == "<class 'torch.fx.proxy.Proxy'>":
+            return_dict = True
+
+        # Debug Roman - (workaround) we cannot have both input embeds and input id's -
+        # we have no choice but to do input_embeds=None for the tracing stage
+        if str(type(inputs_embeds)) == "<class 'torch.fx.proxy.Proxy'>":
+            inputs_embeds = None
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
         outputs = self.mobilebert(
@@ -1397,15 +1510,27 @@ class MobileBertForQuestionAnswering(MobileBertPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
+        if return_dict:
+            sequence_output = outputs["last_hidden_state"]
+        else:
+            sequence_output = outputs[0]
 
-        sequence_output = outputs[0]
-
-        logits = self.qa_outputs(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
+        logits = self.classifier(sequence_output)
+        start_logits = logits[:, :, 0]
+        end_logits = logits[:, :, 1]
+        # start_logits1, end_logits2 = logits.split(1, dim=-1)
         start_logits = start_logits.squeeze(-1).contiguous()
         end_logits = end_logits.squeeze(-1).contiguous()
 
         total_loss = None
+
+        # Debug Roman - (workaround)
+        # start_positions and end_positions are proxies in the tracing part
+        # need to set them to None (as they are in the regular inference)
+        if str(type(start_positions)) == "<class 'torch.fx.proxy.Proxy'>":
+            start_positions = None
+        if str(type(end_positions)) == "<class 'torch.fx.proxy.Proxy'>":
+            end_positions = None
         if start_positions is not None and end_positions is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
@@ -1425,14 +1550,14 @@ class MobileBertForQuestionAnswering(MobileBertPreTrainedModel):
         if not return_dict:
             output = (start_logits, end_logits) + outputs[2:]
             return ((total_loss,) + output) if total_loss is not None else output
-
-        return QuestionAnsweringModelOutput(
-            loss=total_loss,
-            start_logits=start_logits,
-            end_logits=end_logits,
-            hidden_states=outputs.hidden_states,
-            attentions=outputs.attentions,
-        )
+        else:
+            return QuestionAnsweringModelOutput(
+                loss=total_loss,
+                start_logits=start_logits,
+                end_logits=end_logits,
+                hidden_states=outputs["last_hidden_state"],
+                attentions=outputs["attentions"],
+            )
 
 
 @add_start_docstrings(
@@ -1461,22 +1586,23 @@ class MobileBertForMultipleChoice(MobileBertPreTrainedModel):
         MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, num_choices, sequence_length")
     )
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_DOC,
         output_type=MultipleChoiceModelOutput,
         config_class=_CONFIG_FOR_DOC,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            labels: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], MultipleChoiceModelOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size,)`, *optional*):
@@ -1541,6 +1667,8 @@ class MobileBertForMultipleChoice(MobileBertPreTrainedModel):
 )
 # Copied from transformers.models.bert.modeling_bert.BertForTokenClassification with Bert->MobileBert all-casing
 class MobileBertForTokenClassification(MobileBertPreTrainedModel):
+    _keys_to_ignore_on_load_unexpected = [r"pooler"]
+
     def __init__(self, config):
         super().__init__(config)
         self.num_labels = config.num_labels
@@ -1557,6 +1685,7 @@ class MobileBertForTokenClassification(MobileBertPreTrainedModel):
 
     @add_start_docstrings_to_model_forward(MOBILEBERT_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
+        processor_class=_TOKENIZER_FOR_DOC,
         checkpoint=_CHECKPOINT_FOR_TOKEN_CLASSIFICATION,
         output_type=TokenClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1564,17 +1693,17 @@ class MobileBertForTokenClassification(MobileBertPreTrainedModel):
         expected_loss=_TOKEN_CLASS_EXPECTED_LOSS,
     )
     def forward(
-        self,
-        input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
-        token_type_ids: Optional[torch.Tensor] = None,
-        position_ids: Optional[torch.Tensor] = None,
-        head_mask: Optional[torch.Tensor] = None,
-        inputs_embeds: Optional[torch.Tensor] = None,
-        labels: Optional[torch.Tensor] = None,
-        output_attentions: Optional[bool] = None,
-        output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+            self,
+            input_ids: Optional[torch.Tensor] = None,
+            attention_mask: Optional[torch.Tensor] = None,
+            token_type_ids: Optional[torch.Tensor] = None,
+            position_ids: Optional[torch.Tensor] = None,
+            head_mask: Optional[torch.Tensor] = None,
+            inputs_embeds: Optional[torch.Tensor] = None,
+            labels: Optional[torch.Tensor] = None,
+            output_attentions: Optional[bool] = None,
+            output_hidden_states: Optional[bool] = None,
+            return_dict: Optional[bool] = None,
     ) -> Union[Tuple[torch.Tensor], TokenClassifierOutput]:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):

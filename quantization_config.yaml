@@ -1,0 +1,66 @@
+Q34G67#!: True
+QAT:
+  warmup_epochs: 3
+  training_set_length: 100
+  batch_size: 16
+  skip_first_conv_quantization: On
+  per_channel: False
+  device: 'cuda'
+  data_quantization:
+    status: On
+    bits: 8
+    ptq:
+      quantile: False
+    custom_bits: {"mobilebert__model_encoder__model_layer_23__model_attention__model_self__model_query__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_self__model_key__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_self__model_value__model_output_quantizer_0_0": 16,
+                  "mobilebert_encoder_layer_23_attention_self_softmax": 16,
+                  "mobilebert_encoder_layer_23_attention_self_softmax_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_self__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_output__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_output__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_attention__model_output__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_intermediate__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert_encoder_layer_23_intermediate_intermediate_act_fn_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_bottleneck__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_bottleneck__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_output__model_bottleneck__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_bottleneck__model_input__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_bottleneck__model_input__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_bottleneck__model_attention__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_bottleneck__model_attention__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_0__model_intermediate__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert_encoder_layer_23_ffn_0_intermediate_intermediate_act_fn_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_0__model_output__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_0__model_output__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_0__model_output__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_1__model_intermediate__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert_encoder_layer_23_ffn_1_intermediate_intermediate_act_fn_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_1__model_output__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_1__model_output__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_1__model_output__model_LayerNorm__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_2__model_intermediate__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert_encoder_layer_23_ffn_2_intermediate_intermediate_act_fn_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_2__model_output__model_dense__model_output_quantizer_0_0": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_2__model_output__model_LayerNorm__model": 16,
+                  "mobilebert__model_encoder__model_layer_23__model_ffn_2__model_output__model_LayerNorm__model_output_quantizer_0_0": 16
+    }
+
+    symmetric: False
+    pact: False
+    moving_average: True
+    statistical_moving_average: False
+
+
+  weights_quantization:
+    status: On
+    observer: min-max
+    symmetric: False
+    per_tensor: True
+    per_channel: False
+    bits: 8
+    custom_bits: {}
+    layer_norm: False
