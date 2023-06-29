@@ -10,20 +10,22 @@ LiteML version supporting this project:
 * ailabs-qat        0.2.20
 * ailabs-shared     0.2.11
 
-# Requirements 
-pip install torch==1.13.0+cu117 torchvision==0.14.0+cu117 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu117
-tenrosflow==2.10.0 
-bert-tensorflow==1.0.1
-change tf.gfile.GFile to tf.io.gfile.GFile in venv/lib/python3.8/site-packages/bert/tokenization.py
-onnx==1.12.0
-safetensors==0.3.1
-datasets==2.13.0
+
 
 
 # Prerequisits
 1) Before we run the example we need to make sure we created a new virtual environment
 2) activate it and run the "install.sh" script, This will install the .whl files
 3) install requirements.
+
+# Requirements 
+pip install torch==1.13.0+cu117 torchvision==0.14.0+cu117 torchaudio==0.13.0 --extra-index-url https://download.pytorch.org/whl/cu117  
+tenrosflow==2.10.0   
+bert-tensorflow==1.0.1  
+change tf.gfile.GFile to tf.io.gfile.GFile in venv/lib/python3.8/site-packages/bert/tokenization.py  
+onnx==1.12.0  
+safetensors==0.3.1  
+datasets==2.13.0  
 
 # Getting Started
 
@@ -36,6 +38,7 @@ There are 3 modes of operation in this script:
   Performing QAT on the network - requires GPU
 
 ### Important
+* If possible - run the code using pycharm, as you may want to change some parameters.
 * In both PTQ and QAT modes we use the SQUAD training set for quantization and the valudation set is run on the resulting, quantized model.
 * In floating point and in PTQ modes - we support both gpu and cpu processing
 * In QAT - we support only gpu - meaning the machine must support CUDA and have a  GPU on it
