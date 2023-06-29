@@ -35,11 +35,11 @@ There are 3 modes of operation in this script:
 * In QAT - we support only gpu - meaning the machine must support CUDA and have a  GPU on it
 # Running the code
 ## floating point mode
-run_PTQ.py PyTorch_Float cpu/gpu
+run_Float_or_PTQ.py PyTorch_Float cpu/gpu
 ## PTQ mode
-run_PTQ.py PyTorch_8Bit cpu/gpu
+run_Float_or_PTQ.py PyTorch_8Bit cpu/gpu
 ## QAT mode
-
+run_QAT.py gpu
 
 
 
