@@ -30,11 +30,11 @@ datasets==2.13.0
 # Getting Started
 
 There are 3 modes of operation in this script:
-* Floating point mode
+* Floating point mode  
   In this mode we simply run the pytorch floating point model "as-is" on the SQUAD validation set 
-* PTQ mode
+* PTQ mode  
   Performing PTQ on the network
-* QAT mode
+* QAT mode  
   Performing QAT on the network - requires GPU
 
 ### Important
